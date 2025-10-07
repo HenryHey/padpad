@@ -5,6 +5,7 @@
   const statusText = document.getElementById('statusText');
   const hintEl = document.getElementById('hint');
 
+  const KEYBOARD_MODE_TIMEOUT = 30000;
   const hasGamepadApi = !!(navigator.getGamepads || navigator.webkitGetGamepads);
   if (!hasGamepadApi) {
     statusDot.classList.add('disconnected');
@@ -15,23 +16,23 @@
   }
 
   const buttonNamesStandard = [
-    'A / Cross',
-    'B / Circle',
-    'X / Square',
-    'Y / Triangle',
+    'A',
+    'B',
+    'X',
+    'Y',
     'L1',
     'R1',
     'L2',
     'R2',
-    'Select / View',
-    'Start / Options',
+    'Select',
+    'Start',
     'L3',
     'R3',
-    'DPad Up',
-    'DPad Down',
-    'DPad Left',
-    'DPad Right',
-    'Home / Guide'
+    'Up',
+    'Down',
+    'Left',
+    'Right',
+    'Home'
   ];
 
   let activeIndex = null; // index in navigator.getGamepads()
@@ -97,7 +98,7 @@
         hintEl.textContent = 'No controller found. Keyboard mode active: arrows/WASD, Z/X/C/V, Space/Enter, Shift/Ctrl, Tab/1–4.';
       }
       keyboardTimerId = null;
-    }, 5000);
+    }, KEYBOARD_MODE_TIMEOUT);
   }
 
   function cancelKeyboardFallback() {
