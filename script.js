@@ -73,6 +73,63 @@
     Escape: 16 // Home / Guide
   };
 
+  // Sequence tracking (time-ordered button presses)
+  const SEQUENCE_IDLE_TIMEOUT_MS = 1000;
+  let lastInputAt = 0; // epoch ms of the last new press detected
+  let buttonPressSequence = []; // array of labels, e.g. ["A", "Right", ...]
+  let previouslyPressedIndices = new Set(); // indices pressed in previous frame
+
+  function labelForIndex(index, gamepad) {
+    const isStandard = gamepad && gamepad.mapping === 'standard';
+    return isStandard && buttonNamesStandard[index] ? buttonNamesStandard[index] : `Button ${index}`;
+  }
+
+  function getPressedIndices(gamepad) {
+    const pressed = new Set();
+    if (!gamepad || !gamepad.buttons) return pressed;
+    for (let i = 0; i < gamepad.buttons.length; i++) {
+      const b = gamepad.buttons[i];
+      const isPressed = b.pressed || b.value > 0.5; // include analog triggers
+      if (isPressed) pressed.add(i);
+    }
+    return pressed;
+  }
+
+  function appendNewPresses(gamepad) {
+    const now = Date.now();
+    const currentlyPressed = getPressedIndices(gamepad);
+    let hasNewPress = false;
+    for (const index of currentlyPressed) {
+      if (!previouslyPressedIndices.has(index)) {
+        buttonPressSequence.push(labelForIndex(index, gamepad));
+        hasNewPress = true;
+      }
+    }
+    if (hasNewPress) lastInputAt = now;
+    previouslyPressedIndices = currentlyPressed;
+  }
+
+  function resetSequence() {
+    buttonPressSequence = [];
+  }
+
+  function renderSequence() {
+    while (pressedEl.firstChild) pressedEl.removeChild(pressedEl.firstChild);
+    if (buttonPressSequence.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'chip';
+      li.textContent = 'None';
+      pressedEl.appendChild(li);
+      return;
+    }
+    for (const label of buttonPressSequence) {
+      const li = document.createElement('li');
+      li.className = 'chip';
+      li.textContent = label;
+      pressedEl.appendChild(li);
+    }
+  }
+
   function getPads() {
     const getter = navigator.getGamepads || navigator.webkitGetGamepads;
     const pads = getter.call(navigator) || [];
@@ -144,58 +201,36 @@
     }
   }
 
-  function renderPressed(gamepad) {
-    while (pressedEl.firstChild) pressedEl.removeChild(pressedEl.firstChild);
-    if (!gamepad) return;
-
-    const isStandard = gamepad.mapping === 'standard';
-    const names = [];
-    for (let i = 0; i < gamepad.buttons.length; i++) {
-      const b = gamepad.buttons[i];
-      const isPressed = b.pressed || b.value > 0.5; // include analog triggers
-      if (isPressed) {
-        const label = isStandard && buttonNamesStandard[i] ? buttonNamesStandard[i] : `Button ${i}`;
-        names.push(label);
-      }
-    }
-
-    if (names.length === 0) {
-      const li = document.createElement('li');
-      li.className = 'chip';
-      li.textContent = 'None';
-      pressedEl.appendChild(li);
-    } else {
-      for (const n of names) {
-        const li = document.createElement('li');
-        li.className = 'chip';
-        li.textContent = n;
-        pressedEl.appendChild(li);
-      }
-    }
-  }
 
   function update() {
     const gp = pickActiveGamepad();
     if (gp) {
       nameEl.textContent = `${gp.id}`;
       setStatus(true, 'Connected');
-      hintEl.textContent = 'Press buttons to see them here.';
+      hintEl.textContent = 'Press buttons to build a sequence (resets after 1s idle).';
       // Prefer the real controller over keyboard mode
       cancelKeyboardFallback();
       keyboardModeEnabled = false;
-      renderPressed(gp);
+      appendNewPresses(gp);
     } else if (keyboardModeEnabled) {
       nameEl.textContent = 'Keyboard emulation';
       setStatus(true, 'Keyboard mode');
       // Keep the hint concise while in keyboard mode
-      hintEl.textContent = 'Use arrows/WASD, Z/X/C/V, Space/Enter, Shift/Ctrl, Tab/1–4.';
-      renderPressed(keyboardGamepad());
+      hintEl.textContent = 'Use arrows/WASD, Z/X/C/V, Space/Enter, Shift/Ctrl, Tab/1–4 (resets after 1s idle).';
+      appendNewPresses(keyboardGamepad());
     } else {
       nameEl.textContent = 'No gamepad connected';
       setStatus(false, 'Waiting…');
       hintEl.textContent = 'Press any button on your controller to begin.';
-      renderPressed(null);
+      previouslyPressedIndices = new Set();
     }
+    // Reset the recorded sequence after 1s without a new press
+    const now = Date.now();
+    if (lastInputAt !== 0 && now - lastInputAt > SEQUENCE_IDLE_TIMEOUT_MS && buttonPressSequence.length > 0) {
+      resetSequence();
+      lastInputAt = 0;
+    }
+    renderSequence();
     rafId = window.requestAnimationFrame(update);
   }
 
