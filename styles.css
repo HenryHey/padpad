@@ -71,7 +71,8 @@ h1 {
 
 .pressed {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  flex-wrap: nowrap;
   gap: 8px;
   margin: 8px 0 0;
   padding: 0;
@@ -84,6 +85,35 @@ h1 {
   padding: 6px 10px;
   border-radius: 999px;
   font-size: 13px;
+}
+
+.snapshot-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.snapshot-row--inactive {
+  opacity: 0.25;
+}
+
+.snapshot-chip {
+  border: 1px solid var(--border);
+  background: #0f1217;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.snapshot-chip--label {
+  border-color: transparent;
+  background: transparent;
+  padding-left: 0;
+  font-weight: 500;
+}
+
+.snapshot-chip--empty {
+  font-style: italic;
 }
 
 .hint {

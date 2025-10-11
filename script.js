@@ -5,7 +5,7 @@
   const statusText = document.getElementById('statusText');
   const hintEl = document.getElementById('hint');
 
-  const KEYBOARD_MODE_TIMEOUT = 30000;
+  const KEYBOARD_MODE_TIMEOUT = 1000;
   const hasGamepadApi = !!(navigator.getGamepads || navigator.webkitGetGamepads);
   if (!hasGamepadApi) {
     statusDot.classList.add('disconnected');
@@ -14,6 +14,8 @@
     hintEl.textContent = '';
     return;
   }
+
+  let globalTick = 0;
 
   const buttonNamesStandard = [
     'A',
@@ -73,60 +75,108 @@
     Escape: 16 // Home / Guide
   };
 
-  // Sequence tracking (time-ordered button presses)
-  const SEQUENCE_IDLE_TIMEOUT_MS = 1000;
-  let lastInputAt = 0; // epoch ms of the last new press detected
-  let buttonPressSequence = []; // array of labels, e.g. ["A", "Right", ...]
-  let previouslyPressedIndices = new Set(); // indices pressed in previous frame
+  // Timeline sampling (every N frames) and rendering per-button timelines
+  const SEQUENCE_IDLE_TIMEOUT_MS = 200;
+  const SAMPLE_EVERY_N_FRAMES = 2;
+  const MAX_SNAPSHOT_ROWS = 30;
+  const SNAPSHOT_ROW_HEIGHT_PX = 18;
+  let frameCounter = 0;
+  let lastInputAt = 0; // epoch ms of last frame that had any pressed button
+  let sequenceActive = false;
+  const sampledTicks = []; // Array<Array<string>> pressed labels per tick
+
+  pressedEl.style.height = `${MAX_SNAPSHOT_ROWS * SNAPSHOT_ROW_HEIGHT_PX}px`;
+  pressedEl.style.maxHeight = pressedEl.style.height;
+  pressedEl.style.overflowY = 'hidden';
+  pressedEl.style.overflowX = 'hidden';
+  pressedEl.style.position = 'relative';
+  pressedEl.style.gap = '2px';
 
   function labelForIndex(index, gamepad) {
     const isStandard = gamepad && gamepad.mapping === 'standard';
     return isStandard && buttonNamesStandard[index] ? buttonNamesStandard[index] : `Button ${index}`;
   }
 
-  function getPressedIndices(gamepad) {
-    const pressed = new Set();
-    if (!gamepad || !gamepad.buttons) return pressed;
-    for (let i = 0; i < gamepad.buttons.length; i++) {
-      const b = gamepad.buttons[i];
-      const isPressed = b.pressed || b.value > 0.5; // include analog triggers
-      if (isPressed) pressed.add(i);
-    }
-    return pressed;
+  function resetTimeline() {
+    sampledTicks.length = 0;
   }
 
-  function appendNewPresses(gamepad) {
-    const now = Date.now();
-    const currentlyPressed = getPressedIndices(gamepad);
-    let hasNewPress = false;
-    for (const index of currentlyPressed) {
-      if (!previouslyPressedIndices.has(index)) {
-        buttonPressSequence.push(labelForIndex(index, gamepad));
-        hasNewPress = true;
+  function sampleTimeline(gamepad) {
+    if (!gamepad || !gamepad.buttons) return;
+    const n = gamepad.buttons.length;
+    const pressedLabels = [];
+    for (let i = 0; i < n; i++) {
+      const b = gamepad.buttons[i];
+      const isPressed = !!(b.pressed || b.value > 0.5);
+      if (isPressed) pressedLabels.push(labelForIndex(i, gamepad));
+    }
+
+    let equal = false;
+    if (sampledTicks.length == pressedLabels.length) {
+      for (let i=0; i<sampledTicks.length; i++) {
+        if(sampledTicks[i] == pressedLabels[i]) {
+          equal = true;
+        }
       }
     }
-    if (hasNewPress) lastInputAt = now;
-    previouslyPressedIndices = currentlyPressed;
+    if (!equal) {
+      sampledTicks.push(pressedLabels);
+    }
+    if (sampledTicks.length > MAX_SNAPSHOT_ROWS) sampledTicks.shift();
   }
 
-  function resetSequence() {
-    buttonPressSequence = [];
-  }
-
-  function renderSequence() {
+  function renderTimeline(gamepad) {
     while (pressedEl.firstChild) pressedEl.removeChild(pressedEl.firstChild);
-    if (buttonPressSequence.length === 0) {
-      const li = document.createElement('li');
-      li.className = 'chip';
-      li.textContent = 'None';
-      pressedEl.appendChild(li);
+    if (!sequenceActive) {
+      // When inactive, show all buttons top-to-bottom
+      globalTick = 0;
+      const n = (gamepad && gamepad.buttons ? gamepad.buttons.length : buttonNamesStandard.length);
+      for (let i = 0; i < n; i++) {
+        const row = document.createElement('li');
+        row.className = 'snapshot-row';
+        const chip = document.createElement('span');
+        chip.className = 'snapshot-chip snapshot-chip--label';
+        chip.textContent = buttonNamesStandard[i] || labelForIndex(i, gamepad);
+        row.appendChild(chip);
+        pressedEl.appendChild(row);
+      }
       return;
     }
-    for (const label of buttonPressSequence) {
-      const li = document.createElement('li');
-      li.className = 'chip';
-      li.textContent = label;
-      pressedEl.appendChild(li);
+
+    globalTick++;
+    // While active, render one line per sample tick, only showing pressed buttons
+    for (let t = 0; t < sampledTicks.length; t++) {
+      const row = document.createElement('li');
+      row.className = 'snapshot-row snapshot-row--active';
+      row.style.minHeight = `${SNAPSHOT_ROW_HEIGHT_PX}px`;
+      const labels = sampledTicks[t];
+      row.innerHTML = globalTick;
+      if (labels.length === 0) {
+        const placeholder = document.createElement('span');
+        placeholder.className = 'snapshot-chip snapshot-chip--empty';
+        placeholder.textContent = '—';
+        row.appendChild(placeholder);
+      } else {
+        for (let j = 0; j < labels.length; j++) {
+          const chip = document.createElement('span');
+          chip.className = 'snapshot-chip snapshot-chip--active';
+          chip.textContent = labels[j];
+          row.appendChild(chip);
+        }
+      }
+      pressedEl.appendChild(row);
+    }
+
+    // Pad remaining rows to keep viewport filled with 30 snapshots
+    for (let pad = sampledTicks.length; pad < MAX_SNAPSHOT_ROWS; pad++) {
+      const row = document.createElement('li');
+      row.className = 'snapshot-row snapshot-row--inactive';
+      row.style.minHeight = `${SNAPSHOT_ROW_HEIGHT_PX}px`;
+      const placeholder = document.createElement('span');
+      placeholder.className = 'snapshot-chip snapshot-chip--empty';
+      placeholder.textContent = '·';
+      row.appendChild(placeholder);
+      pressedEl.appendChild(row);
     }
   }
 
@@ -204,33 +254,53 @@
 
   function update() {
     const gp = pickActiveGamepad();
+    let activePad = null;
     if (gp) {
       nameEl.textContent = `${gp.id}`;
       setStatus(true, 'Connected');
-      hintEl.textContent = 'Press buttons to build a sequence (resets after 1s idle).';
+      hintEl.textContent = 'Sampling every 2 frames; showing last 30 snapshots (resets after 0.2s idle).';
       // Prefer the real controller over keyboard mode
       cancelKeyboardFallback();
       keyboardModeEnabled = false;
-      appendNewPresses(gp);
+      activePad = gp;
     } else if (keyboardModeEnabled) {
       nameEl.textContent = 'Keyboard emulation';
       setStatus(true, 'Keyboard mode');
       // Keep the hint concise while in keyboard mode
-      hintEl.textContent = 'Use arrows/WASD, Z/X/C/V, Space/Enter, Shift/Ctrl, Tab/1–4 (resets after 1s idle).';
-      appendNewPresses(keyboardGamepad());
+      hintEl.textContent = 'WASD/arrows, Z/X/C/V, Space/Enter, Shift/Ctrl, Tab/1–4. Showing last 30 snapshots (reset after 0.2s idle).';
+      activePad = keyboardGamepad();
     } else {
       nameEl.textContent = 'No gamepad connected';
       setStatus(false, 'Waiting…');
       hintEl.textContent = 'Press any button on your controller to begin.';
-      previouslyPressedIndices = new Set();
+      activePad = null;
     }
-    // Reset the recorded sequence after 1s without a new press
+
     const now = Date.now();
-    if (lastInputAt !== 0 && now - lastInputAt > SEQUENCE_IDLE_TIMEOUT_MS && buttonPressSequence.length > 0) {
-      resetSequence();
-      lastInputAt = 0;
+    if (activePad && activePad.buttons && activePad.buttons.length > 0) {
+      const anyPressed = activePad.buttons.some(b => b.pressed || b.value > 0.5);
+      if (anyPressed) {
+        lastInputAt = now;
+        if (!sequenceActive) {
+          sequenceActive = true;
+          resetTimeline();
+          sampleTimeline(activePad); // capture immediately on start
+        }
+      }
     }
-    renderSequence();
+
+    if (sequenceActive) {
+      if (lastInputAt !== 0 && now - lastInputAt > SEQUENCE_IDLE_TIMEOUT_MS) {
+        sequenceActive = false;
+        resetTimeline();
+        lastInputAt = 0;
+      } else if (activePad && frameCounter % SAMPLE_EVERY_N_FRAMES === 0) {
+        sampleTimeline(activePad);
+      }
+    }
+
+    renderTimeline(activePad);
+    frameCounter++;
     rafId = window.requestAnimationFrame(update);
   }
 
