@@ -83,7 +83,7 @@
   let frameCounter = 0;
   let lastInputAt = 0; // epoch ms of last frame that had any pressed button
   let sequenceActive = false;
-  const sampledTicks = []; // Array<Array<string>> pressed labels per tick
+  const sampledTicks = []; // Array<{labels: Array<string>, duration: number}> pressed labels and duration
 
   pressedEl.style.height = `${MAX_SNAPSHOT_ROWS * SNAPSHOT_ROW_HEIGHT_PX}px`;
   pressedEl.style.maxHeight = pressedEl.style.height;
@@ -111,17 +111,34 @@
       if (isPressed) pressedLabels.push(labelForIndex(i, gamepad));
     }
 
-    let equal = false;
-    if (sampledTicks.length == pressedLabels.length) {
-      for (let i=0; i<sampledTicks.length; i++) {
-        if(sampledTicks[i] == pressedLabels[i]) {
-          equal = true;
+    // Check if current press matches the last entry
+    if (sampledTicks.length > 0) {
+      const lastEntry = sampledTicks[sampledTicks.length - 1];
+      const lastLabels = lastEntry.labels;
+      
+      // Check if the arrays are equal
+      let equal = pressedLabels.length === lastLabels.length;
+      if (equal) {
+        for (let i = 0; i < pressedLabels.length; i++) {
+          if (pressedLabels[i] !== lastLabels[i]) {
+            equal = false;
+            break;
+          }
         }
       }
+      
+      if (equal) {
+        // Same buttons pressed, increment duration
+        lastEntry.duration++;
+      } else {
+        // Different buttons, add new entry
+        sampledTicks.push({ labels: pressedLabels, duration: 1 });
+      }
+    } else {
+      // First entry
+      sampledTicks.push({ labels: pressedLabels, duration: 1 });
     }
-    if (!equal) {
-      sampledTicks.push(pressedLabels);
-    }
+    
     if (sampledTicks.length > MAX_SNAPSHOT_ROWS) sampledTicks.shift();
   }
 
@@ -143,14 +160,21 @@
       return;
     }
 
-    globalTick++;
-    // While active, render one line per sample tick, only showing pressed buttons
+    // While active, render one line per entry, showing duration and pressed buttons
     for (let t = 0; t < sampledTicks.length; t++) {
       const row = document.createElement('li');
       row.className = 'snapshot-row snapshot-row--active';
       row.style.minHeight = `${SNAPSHOT_ROW_HEIGHT_PX}px`;
-      const labels = sampledTicks[t];
-      row.innerHTML = globalTick;
+      const entry = sampledTicks[t];
+      const labels = entry.labels;
+      const duration = entry.duration;
+      
+      // Add duration indicator
+      const durationChip = document.createElement('span');
+      durationChip.className = 'snapshot-chip snapshot-chip--duration';
+      durationChip.textContent = `${duration}`;
+      row.appendChild(durationChip);
+      
       if (labels.length === 0) {
         const placeholder = document.createElement('span');
         placeholder.className = 'snapshot-chip snapshot-chip--empty';

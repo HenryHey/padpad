@@ -116,6 +116,14 @@ h1 {
   font-style: italic;
 }
 
+.snapshot-chip--duration {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+  min-width: 20px;
+  text-align: center;
+}
+
 .hint {
   margin-top: 10px;
   color: var(--muted);
