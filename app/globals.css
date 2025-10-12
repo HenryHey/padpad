@@ -1,3 +1,7 @@
+* {
+  box-sizing: border-box;
+}
+
 :root {
   color-scheme: light dark;
   --bg: #0b0c10;
@@ -8,18 +12,21 @@
   --accent: #6ea8fe;
 }
 
-html, body {
+html,
+body {
   height: 100%;
   margin: 0;
 }
 
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
+    Arial, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
   background: linear-gradient(180deg, var(--bg), #0e1116);
   color: var(--fg);
   display: flex;
   align-items: center;
   justify-content: center;
+  -webkit-font-smoothing: antialiased;
 }
 
 .card {
@@ -27,7 +34,7 @@ body {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   padding: 22px 22px 18px;
 }
 
@@ -63,11 +70,16 @@ h1 {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #f5a524; /* idle */
+  background: #f5a524;
 }
 
-.status-dot.connected { background: #16a34a; }
-.status-dot.disconnected { background: #ef4444; }
+.status-dot.connected {
+  background: #16a34a;
+}
+
+.status-dot.disconnected {
+  background: #ef4444;
+}
 
 .pressed {
   display: flex;
@@ -138,5 +150,4 @@ h1 {
   filter: invert(1);
   object-fit: contain;
 }
-
 
