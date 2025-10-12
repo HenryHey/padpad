@@ -130,4 +130,13 @@ h1 {
   font-size: 12px;
 }
 
+.arrow-icon {
+  height: 16px;
+  width: 16px;
+  display: inline-block;
+  vertical-align: middle;
+  filter: invert(1);
+  object-fit: contain;
+}
+
 

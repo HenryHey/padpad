@@ -76,8 +76,8 @@
   };
 
   // Timeline sampling (every N frames) and rendering per-button timelines
-  const SEQUENCE_IDLE_TIMEOUT_MS = 200;
-  const SAMPLE_EVERY_N_FRAMES = 2;
+  const SEQUENCE_IDLE_TIMEOUT_MS = 500;
+  const SAMPLE_EVERY_N_FRAMES = 1;
   const MAX_SNAPSHOT_ROWS = 30;
   const SNAPSHOT_ROW_HEIGHT_PX = 18;
   let frameCounter = 0;
@@ -101,6 +101,84 @@
     sampledTicks.length = 0;
   }
 
+  function mergeDiagonals(labels) {
+    // Convert diagonal pairs into single diagonal labels
+    const merged = [];
+    const used = new Set();
+    
+    for (let i = 0; i < labels.length; i++) {
+      if (used.has(i)) continue;
+      const label = labels[i];
+      
+      // Check for diagonal combinations
+      let foundDiagonal = false;
+      if (label === 'Up') {
+        const rightIdx = labels.findIndex((l, idx) => l === 'Right' && !used.has(idx));
+        const leftIdx = labels.findIndex((l, idx) => l === 'Left' && !used.has(idx));
+        if (rightIdx !== -1) {
+          merged.push('Up-Right');
+          used.add(i);
+          used.add(rightIdx);
+          foundDiagonal = true;
+        } else if (leftIdx !== -1) {
+          merged.push('Up-Left');
+          used.add(i);
+          used.add(leftIdx);
+          foundDiagonal = true;
+        }
+      } else if (label === 'Down') {
+        const rightIdx = labels.findIndex((l, idx) => l === 'Right' && !used.has(idx));
+        const leftIdx = labels.findIndex((l, idx) => l === 'Left' && !used.has(idx));
+        if (rightIdx !== -1) {
+          merged.push('Down-Right');
+          used.add(i);
+          used.add(rightIdx);
+          foundDiagonal = true;
+        } else if (leftIdx !== -1) {
+          merged.push('Down-Left');
+          used.add(i);
+          used.add(leftIdx);
+          foundDiagonal = true;
+        }
+      } else if (label === 'Right') {
+        const upIdx = labels.findIndex((l, idx) => l === 'Up' && !used.has(idx));
+        const downIdx = labels.findIndex((l, idx) => l === 'Down' && !used.has(idx));
+        if (upIdx !== -1) {
+          merged.push('Up-Right');
+          used.add(i);
+          used.add(upIdx);
+          foundDiagonal = true;
+        } else if (downIdx !== -1) {
+          merged.push('Down-Right');
+          used.add(i);
+          used.add(downIdx);
+          foundDiagonal = true;
+        }
+      } else if (label === 'Left') {
+        const upIdx = labels.findIndex((l, idx) => l === 'Up' && !used.has(idx));
+        const downIdx = labels.findIndex((l, idx) => l === 'Down' && !used.has(idx));
+        if (upIdx !== -1) {
+          merged.push('Up-Left');
+          used.add(i);
+          used.add(upIdx);
+          foundDiagonal = true;
+        } else if (downIdx !== -1) {
+          merged.push('Down-Left');
+          used.add(i);
+          used.add(downIdx);
+          foundDiagonal = true;
+        }
+      }
+      
+      if (!foundDiagonal) {
+        merged.push(label);
+        used.add(i);
+      }
+    }
+    
+    return merged;
+  }
+
   function sampleTimeline(gamepad) {
     if (!gamepad || !gamepad.buttons) return;
     const n = gamepad.buttons.length;
@@ -111,16 +189,19 @@
       if (isPressed) pressedLabels.push(labelForIndex(i, gamepad));
     }
 
+    // Merge diagonal inputs
+    const mergedLabels = mergeDiagonals(pressedLabels);
+
     // Check if current press matches the last entry
     if (sampledTicks.length > 0) {
       const lastEntry = sampledTicks[sampledTicks.length - 1];
       const lastLabels = lastEntry.labels;
       
       // Check if the arrays are equal
-      let equal = pressedLabels.length === lastLabels.length;
+      let equal = mergedLabels.length === lastLabels.length;
       if (equal) {
-        for (let i = 0; i < pressedLabels.length; i++) {
-          if (pressedLabels[i] !== lastLabels[i]) {
+        for (let i = 0; i < mergedLabels.length; i++) {
+          if (mergedLabels[i] !== lastLabels[i]) {
             equal = false;
             break;
           }
@@ -132,14 +213,38 @@
         lastEntry.duration++;
       } else {
         // Different buttons, add new entry
-        sampledTicks.push({ labels: pressedLabels, duration: 1 });
+        sampledTicks.push({ labels: mergedLabels, duration: 1 });
       }
     } else {
       // First entry
-      sampledTicks.push({ labels: pressedLabels, duration: 1 });
+      sampledTicks.push({ labels: mergedLabels, duration: 1 });
     }
     
     if (sampledTicks.length > MAX_SNAPSHOT_ROWS) sampledTicks.shift();
+  }
+
+  function createButtonContent(label) {
+    const arrowMap = {
+      'Up': 'img/arrow-up.png',
+      'Down': 'img/arrow-down.png',
+      'Left': 'img/arrow-left.png',
+      'Right': 'img/arrow-right.png',
+      'Up-Right': 'img/arrow-up-right.png',
+      'Down-Right': 'img/arrow-down-right.png',
+      'Down-Left': 'img/arrow-down-left.png',
+      'Up-Left': 'img/arrow-up-left.png'
+    };
+    
+    if (arrowMap[label]) {
+      const img = document.createElement('img');
+      img.src = arrowMap[label];
+      img.alt = label;
+      img.className = 'arrow-icon';
+      return img;
+    } else {
+      const text = document.createTextNode(label);
+      return text;
+    }
   }
 
   function renderTimeline(gamepad) {
@@ -153,7 +258,8 @@
         row.className = 'snapshot-row';
         const chip = document.createElement('span');
         chip.className = 'snapshot-chip snapshot-chip--label';
-        chip.textContent = buttonNamesStandard[i] || labelForIndex(i, gamepad);
+        const label = buttonNamesStandard[i] || labelForIndex(i, gamepad);
+        chip.appendChild(createButtonContent(label));
         row.appendChild(chip);
         pressedEl.appendChild(row);
       }
@@ -184,7 +290,7 @@
         for (let j = 0; j < labels.length; j++) {
           const chip = document.createElement('span');
           chip.className = 'snapshot-chip snapshot-chip--active';
-          chip.textContent = labels[j];
+          chip.appendChild(createButtonContent(labels[j]));
           row.appendChild(chip);
         }
       }
