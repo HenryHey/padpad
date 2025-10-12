@@ -127,6 +127,160 @@ function mergeDiagonals(labels: string[]) {
   return merged;
 }
 
+type InputSourceSnapshot = Gamepad | GamepadLike | null;
+
+abstract class InputSource {
+  protected currentSnapshot: InputSourceSnapshot = null;
+
+  abstract start(snapshot?: InputSourceSnapshot): void;
+  abstract stop(): void;
+  abstract getSnapshot(): InputSourceSnapshot;
+
+  protected updateSnapshot(next: InputSourceSnapshot) {
+    this.currentSnapshot = next;
+    return next;
+  }
+}
+
+type GamepadInputSourceDeps = {
+  navigatorWithWebkit: NavigatorWithWebkit;
+  applyUiState: (next: UiState) => void;
+  activeIndexRef: MutableRefObject<number | null>;
+};
+
+class GamepadInputSource extends InputSource {
+  constructor(private readonly deps: GamepadInputSourceDeps) {
+    super();
+  }
+
+  start(snapshot: InputSourceSnapshot = this.currentSnapshot) {
+    if (!snapshot || !('id' in snapshot)) return;
+    this.updateSnapshot(snapshot);
+    const gamepad = snapshot as Gamepad;
+    this.deps.applyUiState({
+      gamepadName: gamepad.id,
+      statusText: 'Connected',
+      statusVariant: 'connected',
+      hint: 'Sampling every 2 frames; showing last 30 snapshots (resets after 0.2s idle).',
+    });
+  }
+
+  stop() {
+    this.currentSnapshot = null;
+  }
+
+  getSnapshot() {
+    const gamepad = this.pickActiveGamepad();
+    return this.updateSnapshot(gamepad);
+  }
+
+  handleGamepadConnected(event: GamepadEvent) {
+    this.deps.activeIndexRef.current = event.gamepad.index;
+    this.currentSnapshot = event.gamepad;
+  }
+
+  handleGamepadDisconnected(event: GamepadEvent) {
+    if (this.deps.activeIndexRef.current === event.gamepad.index) {
+      this.deps.activeIndexRef.current = null;
+    }
+    if (this.currentSnapshot && 'index' in this.currentSnapshot && this.currentSnapshot.index === event.gamepad.index) {
+      this.currentSnapshot = null;
+    }
+  }
+
+  private getPads() {
+    const getter = this.deps.navigatorWithWebkit.getGamepads || this.deps.navigatorWithWebkit.webkitGetGamepads;
+    if (!getter) return [] as (Gamepad | null)[];
+    const pads = getter.call(this.deps.navigatorWithWebkit) || [];
+    return Array.from(pads);
+  }
+
+  private pickActiveGamepad() {
+    const pads = this.getPads();
+    const { activeIndexRef } = this.deps;
+    if (activeIndexRef.current != null && pads[activeIndexRef.current]) {
+      return pads[activeIndexRef.current];
+    }
+    for (let i = 0; i < pads.length; i++) {
+      if (pads[i]) {
+        activeIndexRef.current = i;
+        return pads[i];
+      }
+    }
+    activeIndexRef.current = null;
+    return null;
+  }
+}
+
+type KeyboardInputSourceDeps = {
+  applyUiState: (next: UiState) => void;
+  keyboardPressedRef: MutableRefObject<Set<number>>;
+  keyboardModeEnabledRef: MutableRefObject<boolean>;
+};
+
+class KeyboardInputSource extends InputSource {
+  constructor(private readonly deps: KeyboardInputSourceDeps) {
+    super();
+  }
+
+  start(snapshot?: InputSourceSnapshot) {
+    if (snapshot !== undefined) {
+      this.updateSnapshot(snapshot);
+    }
+    if (this.deps.keyboardModeEnabledRef.current) return;
+    this.deps.keyboardModeEnabledRef.current = true;
+    this.deps.applyUiState({
+      gamepadName: 'Keyboard emulation',
+      statusText: 'Keyboard mode',
+      statusVariant: 'connected',
+      hint:
+        'WASD/arrows, Z/X/C/V, Space/Enter, Shift/Ctrl, Tab/1–4. Showing last 30 snapshots (reset after 0.2s idle).',
+    });
+  }
+
+  stop() {
+    if (!this.deps.keyboardModeEnabledRef.current) {
+      this.updateSnapshot(null);
+      return;
+    }
+    this.deps.keyboardModeEnabledRef.current = false;
+    this.deps.keyboardPressedRef.current.clear();
+    this.updateSnapshot(null);
+  }
+
+  getSnapshot() {
+    if (!this.deps.keyboardModeEnabledRef.current) {
+      return this.updateSnapshot(null);
+    }
+    const buttons = buttonNamesStandard.map((_, index) => {
+      const isPressed = this.deps.keyboardPressedRef.current.has(index);
+      return { pressed: isPressed, value: isPressed ? 1 : 0 };
+    });
+    const snapshot: GamepadLike = { mapping: 'standard', buttons };
+    return this.updateSnapshot(snapshot);
+  }
+
+  handleKeyDown(event: KeyboardEvent) {
+    if (!this.deps.keyboardModeEnabledRef.current) return;
+    const index = KEY_TO_BUTTON_INDEX[event.code];
+    if (index == null) return;
+    if (event.code.startsWith('Arrow') || event.code === 'Space' || event.code === 'Tab') {
+      event.preventDefault();
+    }
+    this.deps.keyboardPressedRef.current.add(index);
+  }
+
+  handleKeyUp(event: KeyboardEvent) {
+    if (!this.deps.keyboardModeEnabledRef.current) return;
+    const index = KEY_TO_BUTTON_INDEX[event.code];
+    if (index == null) return;
+    if (event.code.startsWith('Arrow') || event.code === 'Space' || event.code === 'Tab') {
+      event.preventDefault();
+    }
+    this.deps.keyboardPressedRef.current.delete(index);
+  }
+}
+
 export type InputControllerDeps = {
   navigatorWithWebkit: NavigatorWithWebkit;
   applyUiState: (next: UiState) => void;
@@ -168,12 +322,17 @@ export function createInputController({
   lastInputAtRef,
   rafRef,
 }: InputControllerDeps): InputController {
-  const getPads = () => {
-    const getter = navigatorWithWebkit.getGamepads || navigatorWithWebkit.webkitGetGamepads;
-    if (!getter) return [] as (Gamepad | null)[];
-    const pads = getter.call(navigatorWithWebkit) || [];
-    return Array.from(pads);
-  };
+  const gamepadSource = new GamepadInputSource({
+    navigatorWithWebkit,
+    applyUiState,
+    activeIndexRef,
+  });
+
+  const keyboardSource = new KeyboardInputSource({
+    applyUiState,
+    keyboardPressedRef,
+    keyboardModeEnabledRef,
+  });
 
   const resetTimeline = () => {
     timelineRef.current = [];
@@ -212,43 +371,11 @@ export function createInputController({
     applyTimeline([...timeline]);
   };
 
-  const keyboardGamepad = (): GamepadLike => {
-    const buttons = buttonNamesStandard.map((_, index) => {
-      const isPressed = keyboardPressedRef.current.has(index);
-      return { pressed: isPressed, value: isPressed ? 1 : 0 };
-    });
-    return { mapping: 'standard', buttons };
-  };
-
-  const pickActiveGamepad = () => {
-    const pads = getPads();
-    if (activeIndexRef.current != null && pads[activeIndexRef.current]) {
-      return pads[activeIndexRef.current];
-    }
-    for (let i = 0; i < pads.length; i++) {
-      if (pads[i]) {
-        activeIndexRef.current = i;
-        return pads[i];
-      }
-    }
-    activeIndexRef.current = null;
-    return null;
-  };
-
   const cancelKeyboardFallback = () => {
     if (keyboardTimerRef.current != null) {
       window.clearTimeout(keyboardTimerRef.current);
       keyboardTimerRef.current = null;
     }
-  };
-
-  const updateUiForConnected = (gamepad: Gamepad) => {
-    applyUiState({
-      gamepadName: gamepad.id,
-      statusText: 'Connected',
-      statusVariant: 'connected',
-      hint: 'Sampling every 2 frames; showing last 30 snapshots (resets after 0.2s idle).',
-    });
   };
 
   const updateUiForWaiting = () => {
@@ -263,33 +390,25 @@ export function createInputController({
   const scheduleKeyboardFallback = () => {
     if (keyboardTimerRef.current != null) return;
     keyboardTimerRef.current = window.setTimeout(() => {
-      const gp = pickActiveGamepad();
+      const gp = gamepadSource.getSnapshot();
       if (!gp) {
-        keyboardModeEnabledRef.current = true;
-        applyUiState({
-          gamepadName: 'Keyboard emulation',
-          statusText: 'Keyboard mode',
-          statusVariant: 'connected',
-          hint:
-            'WASD/arrows, Z/X/C/V, Space/Enter, Shift/Ctrl, Tab/1–4. Showing last 30 snapshots (reset after 0.2s idle).',
-        });
+        keyboardSource.start();
       }
       keyboardTimerRef.current = null;
     }, KEYBOARD_MODE_TIMEOUT_MS);
   };
 
   const updateLoop = () => {
-    const gamepad = pickActiveGamepad();
+    const gamepad = gamepadSource.getSnapshot();
     let activePad: Gamepad | GamepadLike | null = null;
 
     if (gamepad) {
-      updateUiForConnected(gamepad);
       cancelKeyboardFallback();
-      keyboardModeEnabledRef.current = false;
-      keyboardPressedRef.current.clear();
+      keyboardSource.stop();
+      gamepadSource.start();
       activePad = gamepad;
     } else if (keyboardModeEnabledRef.current) {
-      activePad = keyboardGamepad();
+      activePad = keyboardSource.getSnapshot();
     } else {
       updateUiForWaiting();
     }
@@ -322,40 +441,26 @@ export function createInputController({
   };
 
   const handleGamepadConnected = (event: GamepadEvent) => {
-    activeIndexRef.current = event.gamepad.index;
-    keyboardModeEnabledRef.current = false;
+    gamepadSource.handleGamepadConnected(event);
+    gamepadSource.start(event.gamepad);
+    keyboardSource.stop();
     cancelKeyboardFallback();
-    updateUiForConnected(event.gamepad);
     if (!sequenceActiveRef.current) {
       resetTimeline();
     }
   };
 
   const handleGamepadDisconnected = (event: GamepadEvent) => {
-    if (activeIndexRef.current === event.gamepad.index) {
-      activeIndexRef.current = null;
-    }
+    gamepadSource.handleGamepadDisconnected(event);
     scheduleKeyboardFallback();
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
-    if (!keyboardModeEnabledRef.current) return;
-    const index = KEY_TO_BUTTON_INDEX[event.code];
-    if (index == null) return;
-    if (event.code.startsWith('Arrow') || event.code === 'Space' || event.code === 'Tab') {
-      event.preventDefault();
-    }
-    keyboardPressedRef.current.add(index);
+    keyboardSource.handleKeyDown(event);
   };
 
   const handleKeyUp = (event: KeyboardEvent) => {
-    if (!keyboardModeEnabledRef.current) return;
-    const index = KEY_TO_BUTTON_INDEX[event.code];
-    if (index == null) return;
-    if (event.code.startsWith('Arrow') || event.code === 'Space' || event.code === 'Tab') {
-      event.preventDefault();
-    }
-    keyboardPressedRef.current.delete(index);
+    keyboardSource.handleKeyUp(event);
   };
 
   return {
