@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+---
+When a game uses numpad notation, it means the direction is marked as if it was in a numpad, so:
+1: down-back
+2: down
+3: down-forward
+4: back
+5: neutral
+6: forward
+7: up-back
+8: up
+9: up-forward
