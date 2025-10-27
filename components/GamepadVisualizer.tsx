@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
 
 import {
   MAX_SNAPSHOT_ROWS,
@@ -9,29 +9,144 @@ import {
   createInputController,
   type SnapshotEntry,
   type UiState,
-} from './inputController';
+} from "./inputController";
 
 const ARROW_ASSETS: Record<string, string> = {
-  Up: '/img/arrow-up.png',
-  Down: '/img/arrow-down.png',
-  Left: '/img/arrow-left.png',
-  Right: '/img/arrow-right.png',
-  'Up-Right': '/img/arrow-up-right.png',
-  'Down-Right': '/img/arrow-down-right.png',
-  'Down-Left': '/img/arrow-down-left.png',
-  'Up-Left': '/img/arrow-up-left.png',
+  Up: "/img/arrow-up.png",
+  Down: "/img/arrow-down.png",
+  Left: "/img/arrow-left.png",
+  Right: "/img/arrow-right.png",
+  "Up-Right": "/img/arrow-up-right.png",
+  "Down-Right": "/img/arrow-down-right.png",
+  "Down-Left": "/img/arrow-down-left.png",
+  "Up-Left": "/img/arrow-up-left.png",
 };
 
 const INITIAL_UI_STATE: UiState = {
-  gamepadName: 'No gamepad connected',
-  statusText: 'Waiting…',
-  statusVariant: 'disconnected',
-  hint: 'Press any button on your controller to begin.',
+  gamepadName: "No gamepad connected",
+  statusText: "Waiting…",
+  statusVariant: "disconnected",
+  hint: "Press any button on your controller to begin.",
+};
+
+type AnnotatedSnapshotEntry = SnapshotEntry & { hadouken: boolean };
+
+const DIRECTION_LABELS = new Set([
+  "Up",
+  "Down",
+  "Left",
+  "Right",
+  "Up-Right",
+  "Up-Left",
+  "Down-Right",
+  "Down-Left",
+]);
+
+const ALLOWED_HADOUKEN_LABELS = new Set(["Down", "Down-Right", "Right"]);
+
+const isHadoukenSequenceEndingAt = (
+  entries: SnapshotEntry[],
+  pressIndex: number
+) => {
+  const pressEntry = entries[pressIndex];
+  if (!pressEntry || !pressEntry.labels.includes("A")) return false;
+
+  const hasDisallowedDirections = (labels: string[]) =>
+    labels.some(
+      (label) =>
+        DIRECTION_LABELS.has(label) && !ALLOWED_HADOUKEN_LABELS.has(label)
+    );
+
+  if (hasDisallowedDirections(pressEntry.labels)) {
+    return false;
+  }
+
+  const extractAllowedDirections = (labels: string[]) =>
+    labels.filter((label) => ALLOWED_HADOUKEN_LABELS.has(label));
+
+  const collectDirectionWindows = () => {
+    const windows: string[][] = [];
+    for (let index = pressIndex - 1; index >= 0; index -= 1) {
+      const labels = entries[index]?.labels ?? [];
+      if (labels.includes("A")) {
+        return { windows: [] as string[][], invalid: true } as const;
+      }
+      if (hasDisallowedDirections(labels)) {
+        break;
+      }
+      const allowedDirections = extractAllowedDirections(labels);
+      if (allowedDirections.length > 0) {
+        windows.push(allowedDirections);
+      }
+    }
+    windows.reverse();
+    return { windows, invalid: false } as const;
+  };
+
+  const { windows, invalid } = collectDirectionWindows();
+  if (invalid) {
+    return false;
+  }
+
+  const pressDirections = extractAllowedDirections(pressEntry.labels);
+  const directionSequence =
+    pressDirections.length > 0 ? [...windows, pressDirections] : windows;
+  if (directionSequence.length === 0) {
+    return false;
+  }
+
+  let stage: 0 | 1 | 2 = 0;
+  let sawPureDown = false;
+
+  for (const directions of directionSequence) {
+    const hasDown = directions.includes("Down");
+    const hasDownRight = directions.includes("Down-Right");
+    const hasRight = directions.includes("Right");
+
+    if (hasDown && !hasRight) {
+      sawPureDown = true;
+    }
+
+    if (stage === 0) {
+      if (hasDown) {
+        stage = 1;
+      }
+      continue;
+    }
+
+    if (stage === 1) {
+      if (hasDownRight) {
+        stage = 2;
+      }
+      continue;
+    }
+
+    if (stage === 2) {
+      if (hasRight || hasDownRight) {
+        return sawPureDown;
+      }
+    }
+  }
+
+  return false;
+};
+
+const findHadoukenAEntryIndices = (entries: SnapshotEntry[]) => {
+  const indices = new Set<number>();
+  entries.forEach((entry, index) => {
+    if (!entry.labels.includes("A")) return;
+    if (isHadoukenSequenceEndingAt(entries, index)) {
+      indices.add(index);
+    }
+  });
+  return indices;
 };
 
 export function GamepadVisualizer() {
   const [uiState, setUiState] = useState<UiState>(INITIAL_UI_STATE);
-  const [timelineEntries, setTimelineEntries] = useState<SnapshotEntry[]>([]);
+  const [timelineEntries, setTimelineEntries] = useState<
+    AnnotatedSnapshotEntry[]
+  >([]);
   const [sequenceActive, setSequenceActive] = useState(false);
 
   const uiStateRef = useRef(INITIAL_UI_STATE);
@@ -63,7 +178,12 @@ export function GamepadVisualizer() {
 
   const applyTimeline = (entries: SnapshotEntry[]) => {
     timelineRef.current = entries;
-    setTimelineEntries(entries);
+    const hadoukenIndices = findHadoukenAEntryIndices(entries);
+    const annotatedEntries = entries.map((entry, index) => ({
+      ...entry,
+      hadouken: hadoukenIndices.has(index),
+    }));
+    setTimelineEntries(annotatedEntries);
   };
 
   const applySequenceActive = (active: boolean) => {
@@ -73,18 +193,21 @@ export function GamepadVisualizer() {
   };
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     const navigatorWithWebkit = navigator as Navigator & {
-      webkitGetGamepads?: Navigator['getGamepads'];
+      webkitGetGamepads?: Navigator["getGamepads"];
     };
 
-    if (!navigatorWithWebkit.getGamepads && !navigatorWithWebkit.webkitGetGamepads) {
+    if (
+      !navigatorWithWebkit.getGamepads &&
+      !navigatorWithWebkit.webkitGetGamepads
+    ) {
       applyUiState({
-        gamepadName: 'Try Chrome/Edge/Firefox',
-        statusText: 'Gamepad API not supported',
-        statusVariant: 'disconnected',
-        hint: '',
+        gamepadName: "Try Chrome/Edge/Firefox",
+        statusText: "Gamepad API not supported",
+        statusVariant: "disconnected",
+        hint: "",
       });
       return;
     }
@@ -105,10 +228,16 @@ export function GamepadVisualizer() {
       rafRef,
     });
 
-    window.addEventListener('gamepadconnected', controller.handleGamepadConnected);
-    window.addEventListener('gamepaddisconnected', controller.handleGamepadDisconnected);
-    window.addEventListener('keydown', controller.handleKeyDown);
-    window.addEventListener('keyup', controller.handleKeyUp);
+    window.addEventListener(
+      "gamepadconnected",
+      controller.handleGamepadConnected
+    );
+    window.addEventListener(
+      "gamepaddisconnected",
+      controller.handleGamepadDisconnected
+    );
+    window.addEventListener("keydown", controller.handleKeyDown);
+    window.addEventListener("keyup", controller.handleKeyUp);
 
     controller.scheduleKeyboardFallback();
     rafRef.current = window.requestAnimationFrame(controller.updateLoop);
@@ -119,10 +248,16 @@ export function GamepadVisualizer() {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
-      window.removeEventListener('gamepadconnected', controller.handleGamepadConnected);
-      window.removeEventListener('gamepaddisconnected', controller.handleGamepadDisconnected);
-      window.removeEventListener('keydown', controller.handleKeyDown);
-      window.removeEventListener('keyup', controller.handleKeyUp);
+      window.removeEventListener(
+        "gamepadconnected",
+        controller.handleGamepadConnected
+      );
+      window.removeEventListener(
+        "gamepaddisconnected",
+        controller.handleGamepadDisconnected
+      );
+      window.removeEventListener("keydown", controller.handleKeyDown);
+      window.removeEventListener("keyup", controller.handleKeyUp);
     };
   }, []);
 
@@ -142,6 +277,17 @@ export function GamepadVisualizer() {
     return label;
   };
 
+  const renderLabelWithHadouken = (label: string, hadouken: boolean) => {
+    if (label === "A" && hadouken) {
+      return (
+        <>
+          {renderLabel(label)} <span>HADOUKEN!</span>
+        </>
+      );
+    }
+    return renderLabel(label);
+  };
+
   return (
     <>
       <div className="header">
@@ -158,8 +304,13 @@ export function GamepadVisualizer() {
         {sequenceActive ? (
           <>
             {timelineEntries.map((entry, index) => (
-              <li key={`entry-${index}`} className="snapshot-row snapshot-row--active">
-                <span className="snapshot-chip snapshot-chip--duration">{entry.duration}</span>
+              <li
+                key={`entry-${index}`}
+                className="snapshot-row snapshot-row--active"
+              >
+                <span className="snapshot-chip snapshot-chip--duration">
+                  {entry.duration}
+                </span>
                 {entry.labels.length === 0 ? (
                   <span className="snapshot-chip snapshot-chip--empty">—</span>
                 ) : (
@@ -168,24 +319,29 @@ export function GamepadVisualizer() {
                       key={`${label}-${labelIndex}`}
                       className="snapshot-chip snapshot-chip--active"
                     >
-                      {renderLabel(label)}
+                      {renderLabelWithHadouken(label, entry.hadouken)}
                     </span>
                   ))
                 )}
               </li>
             ))}
-            {Array.from({ length: Math.max(0, MAX_SNAPSHOT_ROWS - timelineEntries.length) }).map(
-              (_, index) => (
-                <li key={`pad-${index}`} className="snapshot-row snapshot-row--inactive">
-                  <span className="snapshot-chip snapshot-chip--empty">·</span>
-                </li>
-              ),
-            )}
+            {Array.from({
+              length: Math.max(0, MAX_SNAPSHOT_ROWS - timelineEntries.length),
+            }).map((_, index) => (
+              <li
+                key={`pad-${index}`}
+                className="snapshot-row snapshot-row--inactive"
+              >
+                <span className="snapshot-chip snapshot-chip--empty">·</span>
+              </li>
+            ))}
           </>
         ) : (
           buttonNamesStandard.map((label, index) => (
             <li key={`label-${index}`} className="snapshot-row">
-              <span className="snapshot-chip snapshot-chip--label">{renderLabel(label)}</span>
+              <span className="snapshot-chip snapshot-chip--label">
+                {renderLabel(label)}
+              </span>
             </li>
           ))
         )}
@@ -196,4 +352,3 @@ export function GamepadVisualizer() {
 }
 
 export default GamepadVisualizer;
-
