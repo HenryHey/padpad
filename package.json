@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "export": "next build"
+    "export": "next build",
+    "build:gh": "NEXT_PUBLIC_BASE_PATH=/padpad next build"
   },
   "dependencies": {
     "react": "19.1.0",
