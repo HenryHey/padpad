@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - master
   workflow_dispatch:
 
 permissions:
@@ -38,7 +39,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build and export site
-        run: pnpm build && touch out/.nojekyll
+        run: pnpm run build:gh
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
@@ -58,4 +59,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
