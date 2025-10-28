@@ -12,14 +12,14 @@ import {
 } from "./inputController";
 
 const ARROW_ASSETS: Record<string, string> = {
-  Up: "/img/arrow-up.png",
-  Down: "/img/arrow-down.png",
-  Left: "/img/arrow-left.png",
-  Right: "/img/arrow-right.png",
-  "Up-Right": "/img/arrow-up-right.png",
-  "Down-Right": "/img/arrow-down-right.png",
-  "Down-Left": "/img/arrow-down-left.png",
-  "Up-Left": "/img/arrow-up-left.png",
+  Up: "/padpad/img/arrow-up.png",
+  Down: "/padpad/img/arrow-down.png",
+  Left: "/padpad/img/arrow-left.png",
+  Right: "/padpad/img/arrow-right.png",
+  "Up-Right": "/padpad/img/arrow-up-right.png",
+  "Down-Right": "/padpad/img/arrow-down-right.png",
+  "Down-Left": "/padpad/img/arrow-down-left.png",
+  "Up-Left": "/padpad/img/arrow-up-left.png",
 };
 
 const INITIAL_UI_STATE: UiState = {
